@@ -1,5 +1,5 @@
 // src/pages/AdminDashboard.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 
 function AdminDashboard() {
   const [employees, setEmployees] = useState([]);
@@ -11,45 +11,79 @@ function AdminDashboard() {
   });
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
-  const API_BASE_URL = "http://localhost:5000/api/admin";
+  // Environment-aware API base (Vite). Fallback to your Render backend URL if env not available.
+  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://bank-inspired-app-hx90.onrender.com/api/admin";
   const token = localStorage.getItem("token");
-  const adminData = JSON.parse(localStorage.getItem("user"));
-
-  // 🔹 Fetch employees
-  const fetchEmployees = async () => {
+  const adminData = (() => {
     try {
-      const res = await fetch(`${API_BASE_URL}/employees`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      return JSON.parse(localStorage.getItem("user"));
+    } catch {
+      return null;
+    }
+  })();
+
+  // Helper: centralized fetch wrapper to attach token and handle 401
+  const authFetch = useCallback(
+    async (url, opts = {}) => {
+      const headers = { ...(opts.headers || {}) };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+
+      const res = await fetch(url, { ...opts, headers });
+      // Auto-logout on unauthorized
+      if (res.status === 401) {
+        handleLogout();
+        throw new Error("Unauthorized. Logged out.");
+      }
+      return res;
+    },
+    [token]
+  );
+
+  // Fetch employees
+  const fetchEmployees = useCallback(async () => {
+    setFetching(true);
+    setMessage("");
+    try {
+      const res = await authFetch(`${API_BASE_URL}/employees`);
       const data = await res.json();
       if (res.ok) {
-        setEmployees(data.employees);
+        setEmployees(Array.isArray(data.employees) ? data.employees : []);
       } else {
-        setMessage(data.message);
+        setMessage(data.message || "Failed to fetch employees");
       }
     } catch (err) {
-      setMessage("Error fetching employees");
+      setMessage(err.message || "Error fetching employees");
+    } finally {
+      setFetching(false);
     }
-  };
+  }, [API_BASE_URL, authFetch]);
 
   useEffect(() => {
+    // if no token, redirect to login immediately
+    if (!token) {
+      window.location.href = "/login";
+      return;
+    }
     fetchEmployees();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally run once on mount
 
-  // 🔹 Handle input change
+  // Input change
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setFormData((p) => ({ ...p, [e.target.name]: e.target.value }));
   };
 
-  // 🔹 Create employee
+  // Create employee
   const handleCreate = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setMessage("");
     try {
-      const res = await fetch(`${API_BASE_URL}/create-employee`, {
+      const res = await authFetch(`${API_BASE_URL}/create-employee`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(formData),
       });
       const data = await res.json();
@@ -58,36 +92,34 @@ function AdminDashboard() {
         setFormData({ name: "", phone: "", aadhaar: "", password: "" });
         fetchEmployees();
       } else {
-        setMessage(data.message);
+        setMessage(data.message || "Failed to create employee");
       }
-    } catch {
-      setMessage("Error creating employee");
+    } catch (err) {
+      setMessage(err.message || "Error creating employee");
     } finally {
       setLoading(false);
     }
   };
 
-  // 🔹 Delete employee
+  // Delete employee
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this employee?")) return;
+    setMessage("");
     try {
-      const res = await fetch(`${API_BASE_URL}/employee/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`${API_BASE_URL}/employee/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (res.ok) {
         setMessage("✅ Employee deleted successfully!");
         fetchEmployees();
       } else {
-        setMessage(data.message);
+        setMessage(data.message || "Failed to delete employee");
       }
-    } catch {
-      setMessage("Error deleting employee");
+    } catch (err) {
+      setMessage(err.message || "Error deleting employee");
     }
   };
 
-  // 🔹 Handle logout
+  // Logout
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -115,7 +147,11 @@ function AdminDashboard() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Message */}
         {message && (
-          <div className={`mb-6 p-4 rounded-lg ${message.includes("✅") ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+          <div
+            className={`mb-6 p-4 rounded-lg ${
+              message.includes("✅") ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+            }`}
+          >
             {message}
           </div>
         )}
@@ -191,8 +227,10 @@ function AdminDashboard() {
                 {employees.length} employees
               </span>
             </div>
-            
-            {employees.length === 0 ? (
+
+            {fetching ? (
+              <div className="text-center py-8 text-gray-500">Loading employees...</div>
+            ) : employees.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <p>No employees found</p>
               </div>
