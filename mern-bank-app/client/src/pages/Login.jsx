@@ -1,89 +1,111 @@
 // src/pages/Login.jsx
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 const Login = () => {
   const [isLogin, setIsLogin] = useState(true);
-  const [userType, setUserType] = useState('user'); // user | employee | admin
+  const [userType, setUserType] = useState("user"); // user | employee | admin
   const [formData, setFormData] = useState({
-    aadhaar: '',
-    name: '',
-    phone: '',
-    accountType: 'savings',
-    password: ''
+    aadhaar: "",
+    name: "",
+    phone: "",
+    accountType: "savings",
+    password: "",
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const navigate = useNavigate();
 
-  const API_BASE_URL = 'http://localhost:5000';
+  // Environment-aware API base (Vite). Fallback to deployed backend URL.
+  const API_BASE = import.meta.env.VITE_API_URL || "https://bank-inspired-app-hx90.onrender.com";
+
+  // If already logged-in, redirect to appropriate dashboard
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    const user = (() => {
+      try {
+        return JSON.parse(localStorage.getItem("user"));
+      } catch {
+        return null;
+      }
+    })();
+    if (token && user) {
+      const role = user.role || user.type || (user.isAdmin ? "admin" : userType);
+      if (role === "admin") navigate("/dashboard/admin");
+      else if (role === "employee") navigate("/dashboard/employee");
+      else navigate("/dashboard/user");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    setFormData((p) => ({ ...p, [e.target.name]: e.target.value }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
-    setSuccess('');
+    setError("");
+    setSuccess("");
 
     try {
-      // ✅ Decide endpoint
       let endpoint = "";
       if (isLogin) {
-        if (userType === 'admin') {
-          endpoint = `${API_BASE_URL}/api/admin/login`; // admin login
-        } else {
-          endpoint = `${API_BASE_URL}/api/users/login`; // users + employees login here
-        }
+        // admin uses separate login route
+        if (userType === "admin") endpoint = `${API_BASE}/api/admin/login`;
+        else endpoint = `${API_BASE}/api/users/login`; // users & employees share user login route
       } else {
-        endpoint = `${API_BASE_URL}/api/users/register`; // only users can register
+        // registration only for normal users
+        endpoint = `${API_BASE}/api/users/register`;
       }
 
-      // ✅ Payload
       const payload = isLogin
         ? { phone: formData.phone, password: formData.password }
-        : formData;
+        : {
+            aadhaar: formData.aadhaar,
+            name: formData.name,
+            phone: formData.phone,
+            accountType: formData.accountType,
+            password: formData.password,
+          };
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
-      console.log("Login/Register response:", data);
+      const data = await res.json();
 
-      if (response.ok) {
+      if (res.ok) {
         if (!isLogin) {
-          setSuccess('Registration successful! Please login.');
+          setSuccess("Registration successful. Please login.");
           setIsLogin(true);
+          setFormData((p) => ({ ...p, password: "" }));
         } else {
-          // Store token and user/admin data
-          localStorage.setItem('token', data.token);
-          const userData = data.user || data.admin;
-          localStorage.setItem('user', JSON.stringify(userData));
-
-          // ✅ Redirect based on role
-          if (userData.role === "admin") {
-            navigate("/dashboard/admin");
-          } else if (userData.role === "employee") {
-            navigate("/dashboard/employee");
-          } else {
-            navigate("/dashboard/user");
+          // normalize returned user object (user/admin/employee)
+          const userData = data.user || data.admin || data.employee || null;
+          if (!data.token || !userData) {
+            setError("Invalid response from server.");
+            return;
           }
+
+          localStorage.setItem("token", data.token);
+          localStorage.setItem("user", JSON.stringify(userData));
+
+          // redirect based on role (fall back to selected userType)
+          const role = userData.role || userData.type || (userData.isAdmin ? "admin" : userType);
+          if (role === "admin") navigate("/dashboard/admin");
+          else if (role === "employee") navigate("/dashboard/employee");
+          else navigate("/dashboard/user");
         }
       } else {
-        setError(data.message || 'Authentication failed');
+        setError(data.message || "Authentication failed");
       }
     } catch (err) {
-      console.error(err);
-      setError('Network error. Please try again.');
+      console.error("Auth error:", err);
+      setError("Network error. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -101,34 +123,27 @@ const Login = () => {
               </svg>
             </div>
             <h1 className="text-3xl font-bold text-gray-800 mb-2">
-              {isLogin ? (userType === 'admin' ? 'Admin Login' : userType === 'employee' ? 'Employee Login' : 'User Login') : 'Create Account'}
+              {isLogin ? (userType === "admin" ? "Admin Login" : userType === "employee" ? "Employee Login" : "User Login") : "Create Account"}
             </h1>
             <p className="text-gray-600">
-              {isLogin
-                ? (userType === 'admin' ? 'Sign in as Admin' : userType === 'employee' ? 'Sign in as Employee' : 'Sign in to continue')
-                : 'Register to get started'}
+              {isLogin ? (userType === "admin" ? "Sign in as Admin" : userType === "employee" ? "Sign in as Employee" : "Sign in to continue") : "Register to get started"}
             </p>
           </div>
 
           {/* Error / Success */}
-          {error && (
-            <div className="mb-6 bg-red-50 text-red-700 p-3 rounded-lg text-sm">{error}</div>
-          )}
-          {success && (
-            <div className="mb-6 bg-green-50 text-green-700 p-3 rounded-lg text-sm">{success}</div>
-          )}
+          {error && <div className="mb-6 bg-red-50 text-red-700 p-3 rounded-lg text-sm">{error}</div>}
+          {success && <div className="mb-6 bg-green-50 text-green-700 p-3 rounded-lg text-sm">{success}</div>}
 
           {/* User Type Toggle - only for login */}
           {isLogin && (
             <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
-              {['user', 'employee', 'admin'].map((type) => (
+              {["user", "employee", "admin"].map((type) => (
                 <button
                   key={type}
                   onClick={() => setUserType(type)}
+                  type="button"
                   className={`flex-1 py-2 px-4 rounded-xl font-medium text-center transition-all duration-300 ${
-                    userType === type
-                      ? "bg-white text-blue-600 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900"
+                    userType === type ? "bg-white text-blue-600 shadow-sm" : "text-gray-600 hover:text-gray-900"
                   }`}
                 >
                   {type.charAt(0).toUpperCase() + type.slice(1)}
@@ -141,7 +156,6 @@ const Login = () => {
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
               <>
-                {/* Aadhaar */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Aadhaar Number</label>
                   <input
@@ -151,33 +165,19 @@ const Login = () => {
                     onChange={handleChange}
                     placeholder="Enter 12-digit Aadhaar"
                     pattern="[0-9]{12}"
-                    required={!isLogin}
+                    required
                     className="w-full px-4 py-3 border rounded-lg"
                   />
                 </div>
-                {/* Name */}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                  <input
-                    name="name"
-                    type="text"
-                    value={formData.name}
-                    onChange={handleChange}
-                    placeholder="Enter your full name"
-                    required={!isLogin}
-                    className="w-full px-4 py-3 border rounded-lg"
-                  />
+                  <input name="name" type="text" value={formData.name} onChange={handleChange} placeholder="Enter your full name" required className="w-full px-4 py-3 border rounded-lg" />
                 </div>
-                {/* Account Type */}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Account Type</label>
-                  <select
-                    name="accountType"
-                    value={formData.accountType}
-                    onChange={handleChange}
-                    required={!isLogin}
-                    className="w-full px-4 py-3 border rounded-lg"
-                  >
+                  <select name="accountType" value={formData.accountType} onChange={handleChange} required className="w-full px-4 py-3 border rounded-lg">
                     <option value="savings">Savings</option>
                     <option value="current">Current</option>
                   </select>
@@ -185,41 +185,17 @@ const Login = () => {
               </>
             )}
 
-            {/* Phone */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-              <input
-                name="phone"
-                type="tel"
-                value={formData.phone}
-                onChange={handleChange}
-                placeholder="Enter phone"
-                required
-                pattern="[0-9]{10}"
-                className="w-full px-4 py-3 border rounded-lg"
-              />
+              <input name="phone" type="tel" value={formData.phone} onChange={handleChange} placeholder="Enter phone" required pattern="[0-9]{10}" className="w-full px-4 py-3 border rounded-lg" />
             </div>
 
-            {/* Password */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input
-                name="password"
-                type="password"
-                value={formData.password}
-                onChange={handleChange}
-                placeholder="Enter password"
-                required
-                minLength="6"
-                className="w-full px-4 py-3 border rounded-lg"
-              />
+              <input name="password" type="password" value={formData.password} onChange={handleChange} placeholder="Enter password" required minLength="6" className="w-full px-4 py-3 border rounded-lg" />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition"
-            >
+            <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition">
               {loading ? "Processing..." : isLogin ? "Sign In" : "Create Account"}
             </button>
           </form>
@@ -232,8 +208,8 @@ const Login = () => {
                 type="button"
                 onClick={() => {
                   setIsLogin(!isLogin);
-                  setError('');
-                  setSuccess('');
+                  setError("");
+                  setSuccess("");
                 }}
                 className="text-blue-600 font-medium hover:text-blue-800"
               >
